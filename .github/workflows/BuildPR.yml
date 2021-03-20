@@ -1,0 +1,78 @@
+name: PullRequest
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  buildMac:
+    name: Build macOS
+    runs-on: macOS-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        xcode: [ Xcode_12.3 ]
+        sourceDist: [ 1,0 ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2.3.4
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: check
+        run: |
+          brew install python
+          python --version
+          pip --version
+          # use python3 as default
+          export PATH=/usr/local/opt/python/libexec/bin:$PATH
+          python --version
+          pip --version
+      - name: Build
+        run: |
+          export PATH=/usr/local/opt/python/libexec/bin:$PATH
+          source multibuild/common_utils.sh
+          source multibuild/travis_steps.sh
+          source travis_multibuild_customize.sh
+          echo $ENABLE_CONTRIB > contrib.enabled
+          echo $ENABLE_HEADLESS > headless.enabled
+          cat contrib.enabled
+          if [[ ${{ matrix.sourceDist }} == 1 ]]; then
+            python -m pip install --upgrade pip
+            python -m pip install scikit-build
+            python setup.py sdist
+          else
+            build_wheel $REPO_DIR $PLAT
+          fi
+      - name: test
+        run: |
+          export PATH=/usr/local/opt/python/libexec/bin:$PATH
+          if [[ ${{ matrix.sourceDist }} == 1 ]]; then
+            echo "skipping tests because of $sourceDist"
+          else
+            install_run $PLAT
+          fi
+      - name: post
+        run: |
+          export PATH=/usr/local/opt/python/libexec/bin:$PATH
+          # macpython 3.5 doesn't support recent TLS protocols which causes twine
+          # upload to fail, so we use the system Python to run twine
+          /usr/bin/python -m ensurepip --user
+          /usr/bin/python -m pip install --user -U pip
+          /usr/bin/python -m pip install --user -U -I twine
+
+          if [[ ${{ matrix.sourceDist }} == 1 ]]; then
+            /usr/bin/python -m twine upload -u ${PYPI_USER} -p ${PASS} --skip-existing ${TRAVIS_BUILD_DIR}/dist/opencv*
+          else
+            /usr/bin/python -m twine upload -u ${PYPI_USER} -p ${PASS} --skip-existing ${TRAVIS_BUILD_DIR}/wheelhouse/opencv*
+          fi
+#      - name: Archive artifact
+#        uses: actions/upload-artifact@v2.2.2
+#        if: ${{ success() }}
+#        with:
+#          name: openCV-python-${{ matrix.xcode }}
+#          path: build/release
